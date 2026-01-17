@@ -1,18 +1,4 @@
-* Preface
-- starting <2026-01-16 Fri>
-- this compares the effects of the original simplistic wildfire probability method vs. Val's Poisson process method on the calculated values of expected carbon stocks and FMU
-- this uses the Yuba RCD project because it is a special case in that its mean ABP is high enough that the expected FRI is < 40 years, which complicates the original method
-- why don't the Poisson process probabilities sum to exactly 1 at each timestep?
-- the code below retains the basic process defined in CF's quantification spreadsheet for clarity rather than using more efficient formulations
-- this is only a small portion of the REM accounting steps!; it only includes what is needed to isolate the effects of compensating for foregone C sequestration due to wildfires
-- there could be some timestep alignment issues at the boundaries due to how the timesteps are defined
-- I haven't yet looked into using Simpson's 1/3 rule for approximating the expectation integral; this uses the trapezoidal approximation in Val's writeup
-* Results
-- gross FMU value for Yuba with current method (no foregone C seq): 5,837 (not calculated here)
-- gross FMU value for Yuba with simplistic WF foregone C seq method: 14,444
-- gross FMU value for Yuba with Poisson process WF foregone C seq method: 12,262
-* Code
-#+begin_src python :results output :tangle carbon_expectation.py :comments link
+# [[file:carbon_expectation.org::*Code][Code:1]]
 import pandas as pd
 import numpy as np
 
@@ -63,14 +49,14 @@ naive_probs.iloc[0][naive_probs.iloc[0] < 0] = 0
 
 # Poisson process method
 # preserve NOWF and WF probabilities in a single dict (following REM notation for time periods)
-poisson_probs = pd.DataFrame.from_dict({interval - 5: [np.exp(-ABP * interval)] + [np.exp(-ABP * wf_yr * delta_t) * ABP * delta_t if wf_yr * delta_t < interval else 0 for wf_yr in np.arange(9)] for interval in np.arange(5, 50, 5)})
+poisson_probs = {interval - 5: [np.exp(-ABP * interval)] + [np.exp(-ABP * wf_yr * delta_t) * ABP * delta_t if wf_yr * delta_t < interval else 0 for wf_yr in np.arange(9)] for interval in np.arange(5, 50, 5)}
 
 def abridged_FMU_calcs(probs: pd.DataFrame, c_b_df: pd.DataFrame, c_p_df: pd.DataFrame, ABP: float, delta_t: int):
     '''
     Print a bunch of intermediate outputs and then the final FMU values.
     '''
 
-    expectation_wts = probs
+    expectation_wts = pd.DataFrame.from_dict(probs)
     expectation_wts["WF"] = ["NOWF", "WF24", "WF29", "WF34", "WF39", "WF44", "WF49", "WF54", "WF59" , "WF64"]
     expectation_wts = expectation_wts.set_index("WF")
 
@@ -92,88 +78,4 @@ def abridged_FMU_calcs(probs: pd.DataFrame, c_b_df: pd.DataFrame, c_p_df: pd.Dat
 
 #abridged_FMU_calcs(naive_probs, c_b_df, c_p_df, ABP, delta_t) # FMU = 14,444
 abridged_FMU_calcs(poisson_probs, c_b_df, c_p_df, ABP, delta_t) # FMU = 12,262
-#+end_src
-
-#+RESULTS:
-#+begin_example
-Baseline carbon stocks
-              0         5        10        15        20        25        30        35        40
-WF
-NOWF  47121511  51910402  56980196  62188494  67471620  72737463  77914663  82865616  87630606
-WF24  41735415  42803181  44444962  46070930  47886448  49849730  52041020  54425580  56892290
-WF29  47121511  46087206  47529288  49431594  51394522  53498553  55821834  58271719  60792791
-WF34  47121511  51910402  50318851  51369360  52923693  54410660  56144648  58103287  60345526
-WF39  47121511  51910402  56980196  54705984  55288959  56308804  57221106  58300674  59755082
-WF44  47121511  51910402  56980196  62188494  59280747  59346363  59738735  60089892  60571424
-WF49  47121511  51910402  56980196  62188494  67471620  63860571  63657885  63757500  63810526
-WF54  47121511  51910402  56980196  62188494  67471620  72737463  68376796  68087556  68038155
-WF59  47121511  51910402  56980196  62188494  67471620  72737463  77914663  72609031  72020578
-WF64  47121511  51910402  56980196  62188494  67471620  72737463  77914663  82865616  76662523
-Expectation weights
-              0         5        10        15        20        25        30        35        40
-WF
-NOWF  0.869358  0.755784  0.657047  0.571209  0.496585  0.431711  0.375311  0.326280  0.283654
-WF24  0.140000  0.140000  0.140000  0.140000  0.140000  0.140000  0.140000  0.140000  0.140000
-WF29  0.000000  0.121710  0.121710  0.121710  0.121710  0.121710  0.121710  0.121710  0.121710
-WF34  0.000000  0.000000  0.105810  0.105810  0.105810  0.105810  0.105810  0.105810  0.105810
-WF39  0.000000  0.000000  0.000000  0.091987  0.091987  0.091987  0.091987  0.091987  0.091987
-WF44  0.000000  0.000000  0.000000  0.000000  0.079969  0.079969  0.079969  0.079969  0.079969
-WF49  0.000000  0.000000  0.000000  0.000000  0.000000  0.069522  0.069522  0.069522  0.069522
-WF54  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.060439  0.060439  0.060439
-WF59  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.052544  0.052544
-WF64  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.045679
-Shouldn't each of these sum to 1?
- 0     1.009358
-5     1.017494
-10    1.024567
-15    1.030715
-20    1.036061
-25    1.040708
-30    1.044748
-35    1.048260
-40    1.051314
-dtype: float64
-Expected Baseline carbon stocks
- 0    4.680843e+07
-1    5.083476e+07
-2    5.476997e+07
-3    5.845648e+07
-4    6.189107e+07
-5    6.501423e+07
-6    6.786183e+07
-7    7.042819e+07
-8    7.278097e+07
-dtype: float64
-Expected Project carbon stocks
- 0    4.680523e+07
-1    5.083028e+07
-2    5.476478e+07
-3    5.845078e+07
-4    6.188490e+07
-5    6.500758e+07
-6    6.785507e+07
-7    7.042153e+07
-8    7.277435e+07
-dtype: float64
-Net expected carbon stocks
- 0   -3204.308384
-1   -4487.535650
-2   -5187.657093
-3   -5700.376873
-4   -6172.230532
-5   -6654.629969
-6   -6754.697768
-7   -6661.214445
-8   -6628.747938
-dtype: float64
-FMU values
- 1    -3266.535650
-2    -3832.657093
-3    -2306.376873
-4     -267.230532
-5     2884.370031
-6     5545.302232
-7     8956.785555
-8    12262.252062
-dtype: float64
-#+end_example
+# Code:1 ends here
