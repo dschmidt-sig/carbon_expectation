@@ -48,15 +48,28 @@ naive_probs.iloc[0] = 1 - naive_probs.iloc[1:].sum()
 naive_probs.iloc[0][naive_probs.iloc[0] < 0] = 0
 
 # Poisson process method
+# this is part of the trapezoidal approximation recommended by Val
+def trapezoidal_weight(k, n, nu_dt = ABP * delta_t):
+    return np.exp(- k * nu_dt) * nu_dt * 0.5 * (
+        (1 if (k > 0) else 0) +
+        (1 if (k < n) else 0)
+    )
+
 # preserve NOWF and WF probabilities in a single dict (following REM notation for time periods)
-poisson_probs = {interval - 5: [np.exp(-ABP * interval)] + [np.exp(-ABP * wf_yr * delta_t) * ABP * delta_t if wf_yr * delta_t < interval else 0 for wf_yr in np.arange(9)] for interval in np.arange(5, 50, 5)}
+poisson_probs = pd.DataFrame.from_dict({interval - 5: [np.exp(-ABP * (interval-5))] + [
+    trapezoidal_weight(wf_yr, interval/delta_t - 1)
+    if wf_yr * delta_t < interval else 0
+    for wf_yr in np.arange(9)
+ ] for interval in np.arange(5, 50, delta_t)})
+# normalize these probabilities; even w/o normalization the overestimation of even the worst one (yr 40) is very small (1.0011)
+poisson_probs = poisson_probs / poisson_probs.sum()
 
 def abridged_FMU_calcs(probs: pd.DataFrame, c_b_df: pd.DataFrame, c_p_df: pd.DataFrame, ABP: float, delta_t: int):
     '''
     Print a bunch of intermediate outputs and then the final FMU values.
     '''
 
-    expectation_wts = pd.DataFrame.from_dict(probs)
+    expectation_wts = probs
     expectation_wts["WF"] = ["NOWF", "WF24", "WF29", "WF34", "WF39", "WF44", "WF49", "WF54", "WF59" , "WF64"]
     expectation_wts = expectation_wts.set_index("WF")
 
@@ -77,5 +90,5 @@ def abridged_FMU_calcs(probs: pd.DataFrame, c_b_df: pd.DataFrame, c_p_df: pd.Dat
     print(f"FMU values\n {fmu}")
 
 #abridged_FMU_calcs(naive_probs, c_b_df, c_p_df, ABP, delta_t) # FMU = 14,444
-abridged_FMU_calcs(poisson_probs, c_b_df, c_p_df, ABP, delta_t) # FMU = 12,262
+abridged_FMU_calcs(poisson_probs, c_b_df, c_p_df, ABP, delta_t) # FMU = 12,625 (12,618 w/o normalization)
 # Code:1 ends here
