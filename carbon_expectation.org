@@ -2,7 +2,7 @@
 - starting <2026-01-16 Fri>
 - this compares the effects of the original simplistic wildfire probability method vs. Val's Poisson process method on the calculated values of expected carbon stocks and FMU
 - this uses the Yuba RCD project because it is a special case in that its mean ABP is high enough that the expected FRI is < 40 years, which complicates the original method
-- why don't the Poisson process probabilities sum to exactly 1 at each timestep?
+- why don't the Poisson process probabilities sum to exactly 1 at each timestep? they do now, with the correct implementation and a better approximation method (plus normalization)
 - the code below retains the basic process defined in CF's quantification spreadsheet for clarity rather than using more efficient formulations
 - this is only a small portion of the REM accounting steps!; it only includes what is needed to isolate the effects of compensating for foregone C sequestration due to wildfires
 - there could be some timestep alignment issues at the boundaries due to how the timesteps are defined
@@ -10,7 +10,7 @@
 * Results
 - gross FMU value for Yuba with current method (no foregone C seq): 5,837 (not calculated here)
 - gross FMU value for Yuba with simplistic WF foregone C seq method: 14,444
-- gross FMU value for Yuba with Poisson process WF foregone C seq method: 12,625 (12,618 w/o normalization)
+- gross FMU value for Yuba with Poisson process WF foregone C seq method: 12,542 (12,542 w/o normalization)
 * Code
 #+begin_src python :results output :tangle carbon_expectation.py :comments link
 import pandas as pd
@@ -68,14 +68,29 @@ def trapezoidal_weight(k, n, nu_dt = ABP * delta_t):
         (1 if (k > 0) else 0) +
         (1 if (k < n) else 0)
     )
+# a more precise approximation recommended and implemented by Val
+def simpson_3_8_weight(k, n, nu_dt = ABP * delta_t):
+    assert n % 2 == 0, "n must be even"
+    return np.exp(- k * nu_dt) * nu_dt * (
+        2 +
+        (2 if (k % 2 == 1) else 0) +
+        (-1 if (k == 0) else 0) +
+        (-1 if (k == n) else 0)
+    ) / 3
 
 # preserve NOWF and WF probabilities in a single dict (following REM notation for time periods)
-poisson_probs = pd.DataFrame.from_dict({interval - 5: [np.exp(-ABP * (interval-5))] + [
-    trapezoidal_weight(wf_yr, interval/delta_t - 1)
-    if wf_yr * delta_t < interval else 0
+poisson_probs = pd.DataFrame.from_dict({n * delta_t: [np.exp(-ABP * n * delta_t)] + [
+    (simpson_3_8_weight(wf_yr, n) if n % 2 == 0 else trapezoidal_weight(wf_yr, n))
+    if wf_yr <= n else 0
     for wf_yr in np.arange(9)
- ] for interval in np.arange(5, 50, delta_t)})
+ ] for n in np.arange(9)})
+#poisson_probs = pd.DataFrame.from_dict({interval - 5: [np.exp(-ABP * (interval-5))] + [
+#    trapezoidal_weight(wf_yr, interval/delta_t - 1)
+#    if wf_yr * delta_t < interval else 0
+#    for wf_yr in np.arange(9)
+# ] for interval in np.arange(5, 50, delta_t)})
 # normalize these probabilities; even w/o normalization the overestimation of even the worst one (yr 40) is very small (1.0011)
+# normalization is justifiable because overestimation is an expected consequence of using the trapezoidal approximation
 poisson_probs = poisson_probs / poisson_probs.sum()
 
 def abridged_FMU_calcs(probs: pd.DataFrame, c_b_df: pd.DataFrame, c_p_df: pd.DataFrame, ABP: float, delta_t: int):
@@ -104,7 +119,7 @@ def abridged_FMU_calcs(probs: pd.DataFrame, c_b_df: pd.DataFrame, c_p_df: pd.Dat
     print(f"FMU values\n {fmu}")
 
 #abridged_FMU_calcs(naive_probs, c_b_df, c_p_df, ABP, delta_t) # FMU = 14,444
-abridged_FMU_calcs(poisson_probs, c_b_df, c_p_df, ABP, delta_t) # FMU = 12,625 (12,618 w/o normalization)
+abridged_FMU_calcs(poisson_probs, c_b_df, c_p_df, ABP, delta_t) # FMU = 12,542 (12,541 w/o normalization)
 #+end_src
 
 #+RESULTS:
@@ -125,16 +140,16 @@ WF64  47121511  51910402  56980196  62188494  67471620  72737463  77914663  8286
 Expectation weights
          0         5        10        15        20        25        30        35        40
 WF
-NOWF  1.0  0.869173  0.755482  0.656679  0.570809  0.496177  0.431310  0.374929  0.325921
-WF24  0.0  0.069985  0.069972  0.069961  0.069951  0.069943  0.069935  0.069929  0.069923
-WF29  0.0  0.060842  0.121662  0.121642  0.121625  0.121610  0.121597  0.121586  0.121576
-WF34  0.0  0.000000  0.052884  0.105751  0.105736  0.105723  0.105712  0.105702  0.105693
-WF39  0.0  0.000000  0.000000  0.045968  0.091922  0.091911  0.091901  0.091893  0.091885
-WF44  0.0  0.000000  0.000000  0.000000  0.039957  0.079904  0.079895  0.079888  0.079881
-WF49  0.0  0.000000  0.000000  0.000000  0.000000  0.034732  0.069457  0.069451  0.069446
-WF54  0.0  0.000000  0.000000  0.000000  0.000000  0.000000  0.030192  0.060378  0.060373
-WF59  0.0  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.026245  0.052486
-WF64  0.0  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.022814
+NOWF  1.0  0.869173  0.755783  0.656679  0.571209  0.496177  0.431710  0.374929  0.326279
+WF24  0.0  0.069985  0.046667  0.069961  0.046667  0.069943  0.046667  0.069929  0.046667
+WF29  0.0  0.060842  0.162280  0.121642  0.162280  0.121610  0.162280  0.121586  0.162280
+WF34  0.0  0.000000  0.035270  0.105751  0.070540  0.105723  0.070540  0.105702  0.070540
+WF39  0.0  0.000000  0.000000  0.045968  0.122649  0.091911  0.122649  0.091893  0.122649
+WF44  0.0  0.000000  0.000000  0.000000  0.026656  0.079904  0.053313  0.079888  0.053313
+WF49  0.0  0.000000  0.000000  0.000000  0.000000  0.034732  0.092696  0.069451  0.092696
+WF54  0.0  0.000000  0.000000  0.000000  0.000000  0.000000  0.020146  0.060378  0.040293
+WF59  0.0  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.026245  0.070058
+WF64  0.0  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000  0.015226
 Shouldn't each of these sum to 1?
  0     1.0
 5     1.0
@@ -149,44 +164,44 @@ dtype: float64
 Expected Baseline carbon stocks
  0    4.712151e+07
 1    5.091874e+07
-2    5.460099e+07
+2    5.462658e+07
 3    5.802104e+07
-4    6.116087e+07
+4    6.120992e+07
 5    6.397114e+07
-6    6.648528e+07
+6    6.656561e+07
 7    6.870376e+07
-8    7.070512e+07
+8    7.079667e+07
 dtype: float64
 Expected Project carbon stocks
  0    4.711828e+07
 1    5.091421e+07
-2    5.459575e+07
+2    5.462138e+07
 3    5.801535e+07
-4    6.115475e+07
+4    6.120386e+07
 5    6.396461e+07
-6    6.647872e+07
+6    6.655903e+07
 7    6.869739e+07
-8    7.069885e+07
+8    7.079032e+07
 dtype: float64
 Net expected carbon stocks
  0   -3228.000000
 1   -4529.103242
-2   -5235.033920
+2   -5197.622115
 3   -5686.793734
-4   -6115.989418
+4   -6063.917497
 5   -6532.598181
-6   -6560.215386
+6   -6584.473405
 7   -6373.592493
-8   -6265.840966
+8   -6349.201702
 dtype: float64
 FMU values
  1    -3308.103242
-2    -3880.033920
+2    -3842.622115
 3    -2292.793734
-4     -210.989418
+4     -158.917497
 5     3006.401819
-6     5739.784614
+6     5715.526595
 7     9244.407507
-8    12625.159034
+8    12541.798298
 dtype: float64
 #+end_example
